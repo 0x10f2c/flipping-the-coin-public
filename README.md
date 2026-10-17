@@ -1,7 +1,7 @@
 > **Security & Legal Notice:** This repo stands up an intentionally vulnerable Active Directory environment preloaded with known offensive-security tooling (Rubeus, Certify, mimikatz, etc.). It is for authorized training and educational use only. Deploy it only into cloud accounts and networks you own or are explicitly authorized to test in. The maintainers and contributors are not responsible for any misuse of this lab or the tools it provisions.
 
 # FlippingTheCoin
-Defcon31 Training labs for workshops and detection
+DEF CON 31 / DEF CON 32 training labs for workshops and detection
 
 This repo is a package of multiple cloud tools that enable the upbring of an active directory lab for training purposes.
 
@@ -15,11 +15,10 @@ The current tech stack is as follows:
 ---
 ## Repo Layout
 
-There are three near-identical Ansible trees - `ansible/`, `fixer/` and `refresher/` - one per build phase that `deployer.py` can run. They started as copies of each other for each phase and have since drifted slightly; they are not auto-generated from a single source, so changes to one tree do not propagate to the others.
+There are two Ansible trees - `ansible/` and `fixer/` - one per build phase that `deployer.py` can run.
 
-- `ansible/` - the playbooks used for the **first run** (`deployer.py -f`), scaling/imaging, `--deploy`, and `--redeployer`. In practice `deployer.py`'s `refresher()` function also calls into this tree rather than `refresher/`, so `ansible/` is the tree actually exercised for both first-run and refresh.
+- `ansible/` - the playbooks used for the **first run** (`deployer.py -f`), scaling/imaging, `--deploy`, `--redeployer`, and **refresh** (`-r`/`--refresh`, `--refreshlab`). `deployer.py`'s `refresher()` function re-applies the same `ansible/domain-playbooks/...` and `ansible/infra-playbooks/...` playbooks used by first-run - "refresh" is not a separate tree, just a re-run of the same playbooks against an existing lab.
 - `fixer/` - the playbooks used by the **fix** phase (`deployer.py --fix` / `--fixlab`), which only re-applies the VPN, ELK and Kali infra playbooks (not the domain-playbooks) to patch up a lab after scaling.
-- `refresher/` - intended for the **refresh** phase, but `deployer.py`'s `refresher()` function currently points at `ansible/domain-playbooks/...` and `ansible/infra-playbooks/...`, not at this tree. `refresher/` is effectively unused by the current `deployer.py` and kept here mainly as the historical basis the `ansible/` tree was refreshed from; treat it as reference material rather than live code.
 
 ---
 ## Offensive Tool Binaries
@@ -27,7 +26,7 @@ There are three near-identical Ansible trees - `ansible/`, `fixer/` and `refresh
 The domain-playbooks intentionally install real offensive-security tooling
 (Rubeus, Certify, mimikatz, winPEAS, PowerUp, etc.) onto the lab boxes so
 students can practice with them. For the public release, these binaries are
-no longer committed into `ansible/files/` and `refresher/files/` - instead
+no longer committed into `ansible/files/` - instead
 the relevant Ansible tasks fetch them at provision time from their pinned
 upstream GitHub releases (with a specific tag/commit noted in a comment next
 to each download task) using `win_get_url`. This is standard practice for
@@ -43,15 +42,6 @@ those tasks carry a comment explaining why.
 ## Important Note
 
 The AWS region is now a single configurable value instead of being hardcoded in several places: `vars.tf` defines `variable "aws_region"` (default `us-west-2`), which `main.tf`'s provider block and `packer/config.pkr.hcl`'s `region` variable both reference. `deployer.py` reads the same default from the `AWS_REGION` environment variable (`os.environ.get("AWS_REGION", "us-west-2")`). To deploy to another region (e.g. `ap-southeast-2`), set `aws_region` in a `terraform.tfvars` file (see `terraform.tfvars.example`) and export `AWS_REGION` with the matching value before running `deployer.py`.
-
----
-## Known Limitations
-
-This is a v1 public release; the following rough edges are known and acknowledged rather than oversights:
-
-- **Instance-ready waiting is flaky.** `deployer.py` has a standing TODO on this (`# This isnt waiting we still get the script running on not ok instances` / `# TODO: FIX THIS` above `ec2checkerstaging()`'s call site) - the script pauses and polls EC2/system status waiters, but it is not yet strictly scoped to the exact instance IDs of the current run, so Ansible can start against boxes that aren't fully ready. If a run fails here, rerun `deployer.py -f` as described in the Usage Guide below.
-- **No error handling yet.** As the deployer itself prints during the ansible stage ("there is no error handling yet"), failures generally surface as raw command output rather than a clean error message - read the console output rather than relying on exit codes.
-- **No region validation.** Setting `AWS_REGION` / `aws_region` to a region without the AMIs or base images this lab expects will fail at `terraform apply` or `packer build` time with provider errors, not a friendly message up front.
 
 ---
 ## Usage Guide
