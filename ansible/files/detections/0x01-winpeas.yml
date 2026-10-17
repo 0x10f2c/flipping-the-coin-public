@@ -1,0 +1,13 @@
+title: Detection 0x01 
+description: "Detection 0x01 - very basic detection detecting WinPEAS based on a known-bad filename. "
+references:
+    - https://github.com/carlospolop/PEASS-ng
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_img:
+        - OriginalFileName: '<FILENAME>'
+        - Image|endswith:
+            - '<EXECUTION_PATH>'
+    condition: 1 of selection_*

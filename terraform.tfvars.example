@@ -1,0 +1,9 @@
+# Copy this file to terraform.tfvars (gitignored) and fill in real values
+# before running `terraform apply`.
+
+# Required: your own /32 IP(s) allowed to manage the lab boxes
+# (SSH/WinRM/etc). Replace the placeholder below.
+MANAGEMENT_IPS = ["CHANGEME.CHANGEME.CHANGEME.CHANGEME/32"]
+
+# Optional: override the AWS region (defaults to us-west-2 in vars.tf).
+# aws_region = "us-west-2"

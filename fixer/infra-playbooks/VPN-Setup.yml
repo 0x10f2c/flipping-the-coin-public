@@ -1,0 +1,60 @@
+- name: VPN Server Setup
+  hosts: all
+  gather_facts: no
+  become: true
+  tasks:
+    - name: Copy reinstall.sh to box
+      ansible.builtin.copy:
+        src: ../files/reinstall.sh
+        dest: /home/ubuntu/openvpn-install/reinstall.sh
+        owner: ubuntu
+        group: ubuntu
+        mode: '0777'
+
+    - name: reinstall vpn
+      become: yes
+      become_user: root
+      shell: |
+        cd openvpn-install
+        ./reinstall.sh
+
+    - name: Copy labclient.sh to box
+      ansible.builtin.copy:
+        src: ../files/labclient.sh
+        dest: /home/ubuntu/openvpn-install/labclient.sh
+        owner: ubuntu
+        group: ubuntu
+        mode: '0777'
+
+    - name: create support profile
+      become: yes
+      become_user: root
+      shell: |
+        cd openvpn-install
+        ./labclient.sh
+
+    - name: copy the labclient  config file off the box
+      fetch: 
+        src: /home/ubuntu/labclient.ovpn
+        dest: labclient.ovpn
+
+
+    - name: Copy labsupport.sh to box
+      ansible.builtin.copy:
+        src: ../files/labsupport.sh
+        dest: /home/ubuntu/openvpn-install/labsupport.sh
+        owner: ubuntu
+        group: ubuntu
+        mode: '0777'
+
+    - name: create support profile
+      become: yes
+      become_user: root
+      shell: |
+        cd openvpn-install
+        ./labsupport.sh
+
+    - name: copy the labclient  config file off the box
+      fetch: 
+        src: /home/ubuntu/labsupport.ovpn
+        dest: labsupport.ovpn

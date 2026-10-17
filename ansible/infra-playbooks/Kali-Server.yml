@@ -1,0 +1,107 @@
+- name: Kali Playbook
+  hosts: all
+  gather_facts: no
+  become: true
+  tasks:
+  - name: Install gnupg  
+    apt:
+      name: gnupg
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+
+
+  - name: Update keys
+    ansible.builtin.shell: wget -q -O - https://archive.kali.org/archive-key.asc | apt-key add
+    become: true
+
+
+  - name: Update apt package lists
+    apt:
+      update_cache: true
+    retries: 5
+    delay: 10
+
+  - name: Update Kali user pwd
+    user:
+      name: kali
+      update_password: always
+      password: $6$CHANGEME$REPLACE_WITH_YOUR_OWN_SHA512_HASH_use_mkpasswd_or_openssl_passwd_-6
+    retries: 5
+    delay: 10
+
+  - name: Install Kali-linux-core
+    apt:
+      name: kali-linux-default
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+
+  - name: Install xfce  
+    apt:
+      name: xfce4
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+  
+
+  - name: Install terminator  
+    apt:
+      name: terminator
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+
+    #  - name: Enable XRPD
+    #    shell: service xrdp start
+    #    become: yes
+    #    become_user: root
+    #    retries: 5
+    #    delay: 10
+
+  - name: Install xrdp  
+    apt:
+      name: xrdp
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+  
+  - name: Enable XRDP 
+    ansible.builtin.service:
+      name: xrdp
+      state: started
+      enabled: yes
+    retries: 5
+    delay: 10
+  
+  - name: install wireshark
+    apt:
+      name: wireshark
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+
+  - name: password auth enablee
+    become: yes
+    become_user: root
+    replace:
+      path: /etc/ssh/sshd_config
+      regexp: "^(.*)PasswordAuthentication(.*)$"
+      replace: "PasswordAuthentication yes"
+
+
+  - name: Enable ssh
+    become: yes
+    become_user: root
+    shell: "sudo systemctl restart ssh.service"
+
+  - name: Unlock ELK
+    ansible.builtin.command: sudo passwd -u kali
+    become: yes
+    become_user: root

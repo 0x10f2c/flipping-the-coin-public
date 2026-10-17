@@ -1,0 +1,11 @@
+title: Detection 0x03
+description: "Detection 0x03 - detect Mimikatz driver installation via keyword search."
+logsource:
+    product: windows
+detection:
+    keywords:
+        - '<KEYWORD>'
+        - '<KEYWORD>'
+    filterSysmonFS:
+        EventID: 15
+    condition: keywords and not filterSysmonFS

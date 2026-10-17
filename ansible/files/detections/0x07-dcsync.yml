@@ -1,0 +1,16 @@
+title: Detection 0x07
+description: "Detection 0x07 - DCSync by a Domain Administrator."
+logsource:
+  product: windows
+  service: security
+detection:
+    selection:
+        EventID: 4662
+        Properties|contains:
+            - 'Replicating Directory Changes All'
+            - '<GUID>'
+            - '<GUID>'
+            - '<GUID>'
+            - '<GUID>'
+        AccessMask: '0x100'
+    condition: selection

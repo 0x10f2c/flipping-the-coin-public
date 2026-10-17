@@ -1,0 +1,9 @@
+- name: ELK Playbook
+  hosts: all
+  gather_facts: no
+  become: true
+  tasks:
+  - name: Unlock ELK
+    ansible.builtin.command: sudo passwd -u ubuntu
+    become: yes
+    become_user: root

@@ -1,0 +1,9 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name: Disable windows defender
+    win_shell: |
+        Set-MpPreference -DisableRealtimeMonitoring $true
+        Set-MpPreference -DisableIOAVProtection $true
+    retries: 5
+    delay: 10

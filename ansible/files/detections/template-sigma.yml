@@ -1,0 +1,8 @@
+title: <title>
+description: <description>
+date: <1970-01-01>
+logsource:
+  category: <category>
+  product: <product>
+detection:
+  selection_something: <something>

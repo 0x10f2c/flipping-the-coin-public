@@ -1,0 +1,208 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+  
+  - name: Change hostname of machine to Box1
+    win_hostname:
+      name: 'Box1'
+    register: res
+    retries: 5
+    delay: 10
+
+
+  - name: Reboot machine
+    win_reboot:
+    when: res.reboot_required
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    register: result
+    until: result is not failed
+    retries: 3
+
+  - name: Set domain controllers as DNS servers
+    win_dns_client:
+      adapter_names: '*'
+      ipv4_addresses: 10.0.1.100
+
+  - name: Join box1 to domain
+    win_domain_membership:
+      dns_domain_name: demo.lab
+      domain_admin_user: lab-admin@demo.lab
+      domain_admin_password: CHANGEME_LAB_ADMIN_PASSWORD
+      state: domain
+    register: domain_state
+    until: domain_state is succeeded 
+    retries: 5
+    delay: 10
+
+#  - name: Join box1 to domain v2
+#    microsoft.ad.membership:
+#      dns_domain_name: demo.lab
+#      domain_admin_user: lab-admin@demo.lab
+#      domain_admin_password: CHANGEME_LAB_ADMIN_PASSWORD
+#      domain_ou_path: "OU=Windows,OU=Servers,DC=demo,DC=lab"
+#      state: domain
+#      reboot: true
+
+
+  - name: Reboot machine to complete domain join
+    ansible.windows.win_reboot:
+    when: domain_state.reboot_required
+    ignore_errors: yes
+    retries: 10
+    delay: 10
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    register: result
+    until: result is not failed
+    retries: 3
+
+
+  - name: Disable RDP NLA part 1
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp 
+      name: SecurityLayer
+      data: 0
+      type: dword
+    retries: 5
+    delay: 10
+
+
+  - name: Disable RDP NLA part 2 
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp 
+      name: UserAuthentication
+      data: 0
+      type: dword
+    retries: 5
+    delay: 10
+
+
+  # hfs.exe is the deliberately-vulnerable Rejetto HFS 2.3 line (the target
+  # of exploit/windows/http/rejetto_hfs_exec). The vendor (rejetto.com/hfs2)
+  # no longer publishes a direct, stable link for this version - the site
+  # explicitly warns it's vulnerable with no fix and only offers an
+  # indirect download flow - and there is no official GitHub release for
+  # the old 2.x binary (github.com/rejetto/hfs only ships the unrelated
+  # HFS3 rewrite). No credible pinned URL was found, so this binary is kept
+  # committed rather than inventing a download source.
+  - name: Copy vulnerable webapp to machine
+    ansible.windows.win_copy:
+      src: ../files/hfs.exe
+      dest: C:\ProgramData\hfs.exe
+    retries: 5
+    delay: 10
+
+
+  - name: Create http-admin user
+    win_user:
+      name: http-admin
+      password: WebTechUses#&Creater@1Extended
+      state: present
+      Groups: 
+        - Users
+    retries: 5
+    delay: 10
+
+
+  - name: Disable win firewall
+    win_firewall:
+      state: disabled
+      profiles: 
+        - Domain
+        - Public
+        - Private
+      tag: disable_firewall
+    retries: 5
+    delay: 10
+
+  - name: Install git
+    win_chocolatey:
+      name: nssm
+      state: present
+    retries: 5
+    delay: 10
+
+  - name: Grant service user ability to log on as a service
+    ansible.windows.win_user_right:
+      name: SeServiceLogonRight
+      users:
+      - http-admin
+      action: add
+    retries: 5
+    delay: 10
+
+  - name: Install the hfs service
+    community.windows.win_nssm:
+      name: hfs
+      application: C:\ProgramData\hfs.exe
+
+
+  - name: Configure and start the hfs service using win_service
+    ansible.windows.win_service:
+      name: hfs
+      username: http-admin
+      password: WebTechUses#&Creater@1Extended
+      start_mode: auto
+      state: started
+
+
+  - name: Disable windows defender
+    win_shell: | 
+        Set-MpPreference -DisableRealtimeMonitoring $true
+        Set-MpPreference -DisableIOAVProtection $true
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+  # disable-defender.exe removed for the public release: custom-built binary
+  # with no credible public upstream source, and redundant with the
+  # Set-MpPreference win_shell task above which already disables
+  # real-time monitoring and IOAV protection.
+
+  - name: Copy unattended.xml to machine
+    ansible.windows.win_copy:
+      src: ../files/unattended.xml
+      dest: C:\Windows\Panther\Unattended.xml
+    retries: 5
+    delay: 10
+
+  # winPEASx64.exe pinned to PEASS-ng release 20230702-bc7ce3ac, the exact
+  # tag already referenced in docs/SOLUTIONS-SPOILERS.md.
+  - name: Download winpeas
+    ansible.windows.win_get_url:
+      url: https://github.com/carlospolop/PEASS-ng/releases/download/20230702-bc7ce3ac/winPEASx64.exe
+      dest: C:\winPEASx64.exe
+    retries: 5
+    delay: 10
+
+  # winPEAS.ps1 is kept as a committed file: the current PEASS-ng releases
+  # (including the 20230702-bc7ce3ac tag pinned above) only publish
+  # winPEASx64.exe/winPEASany.exe/winPEAS.bat, not a winPEAS.ps1 asset, so
+  # there is no current upstream release URL for this exact script to
+  # download from.
+  - name: Copy winpeas ps1
+    ansible.windows.win_copy:
+      src: ../files/winPEAS.ps1
+      dest: C:\winPEAS.ps1
+    retries: 5
+    delay: 10
+
+    
+  - name: Make LocalAdminInst a Ladmin
+    win_group_membership:
+      name: Administrators
+      members:
+        - demo.lab\LocalAdminInst
+      state: present
+    retries: 5
+    delay: 10

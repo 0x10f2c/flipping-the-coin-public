@@ -1,0 +1,70 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+  - name: Create Local Admin for Box1/2 Access Pathway
+    win_domain_user:
+      name: LocalAdminInst
+      password: CHANGEME_LOCALADMININST_PASSWORD
+      state: present
+      groups: 
+        - Domain Users
+    retries: 5
+    delay: 10
+
+  - name: Create Harold HOlt
+    win_domain_user:
+      name: HaroldHolt
+      password: CHANGEME_HAROLDHOLT_PASSWORD
+      state: present
+      groups: 
+        - Domain Users
+    retries: 5
+    delay: 10
+
+  - name: Create Gough Whitlam
+    win_domain_user:
+      name: GoughWhitlam
+      password: CHANGEME_GOUGHWHITLAM_PASSWORD
+      state: present
+      groups: 
+        - Domain Users
+    retries: 5
+    delay: 10
+
+  - name: Make the fileshare admin user, found in the share on srv2
+    win_domain_user:
+      name: fileshare-admin
+      password: CHANGEME_FILESHAREADMIN_PASSWORD
+      state: present
+      groups:
+        - Domain Users
+    retries: 5
+    delay: 10
+
+  - name: Make a user that has dcsync rights
+    win_domain_user:
+      name: dc-syncer
+      password: CHANGEME_DCSYNCER_PASSWORD
+      state: present
+    retries: 5
+    delay: 10
+  
+  - name: Grant dcsync rights to the dc-sync user
+    win_shell: |
+      $usersid = (Get-ADUser dc-syncer).sid
+      dsacls DC=Demo,DC=Lab /G "DEMO\dc-syncer:CA;Replicating Directory Changes"
+      dsacls DC=Demo,DC=Lab /G "DEMO\dc-syncer:CA;Replicating Directory Changes All"
+      dsacls DC=Demo,DC=Lab /G "DEMO\dc-syncer:CA;Replicating Directory Changes in Filtered Set"
+    retries: 5
+    delay: 10
+      
+
+  - name: Make backdoor admin user for supporting students
+    win_domain_user:
+      name: lab-backdoor
+      password: CHANGEME_LABBACKDOOR_PASSWORD
+      groups:
+        - Domain Admins
+      state: present
+    retries: 5
+    delay: 10

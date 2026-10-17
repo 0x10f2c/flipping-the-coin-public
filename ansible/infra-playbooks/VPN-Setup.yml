@@ -1,0 +1,39 @@
+- name: VPN Server Setup
+  hosts: all
+  gather_facts: no
+  become: true
+  tasks:
+    - name: Grab openvpn-install and run it
+      become: yes
+      become_user: root
+      shell: |
+        sleep 20
+        git clone https://github.com/angristan/openvpn-install.git
+        cd openvpn-install
+        export AUTO_INSTALL=y
+        ./openvpn-install.sh
+
+    - name: copy the openvpn client config file off the box
+      fetch: 
+        src: /home/ubuntu/client.ovpn
+        dest: ./client.ovpn
+
+    - name: Copy support.sh to box
+      ansible.builtin.copy:
+        src: ../files/supportvpn.sh
+        dest: /home/ubuntu/openvpn-install/supportvpn.sh
+        owner: ubuntu
+        group: ubuntu
+        mode: '0777'
+
+    - name: Make the support vpn
+      become: yes
+      become_user: root
+      shell: |
+        cd openvpn-install
+        ./supportvpn.sh
+
+    - name: copy the openvpn client config file off the box
+      fetch: 
+        src: /home/ubuntu/support.ovpn
+        dest: support.ovpn

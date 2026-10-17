@@ -1,0 +1,310 @@
+---
+- name: Create new Active-Directory Domain & Forest
+  hosts: all
+  vars:
+    dc_hostname: 'dc01'
+    domain_name: "demo.lab"
+    local_admin: '.\Administrator'
+    temp_password: 'CHANGEME_LAB_ADMIN_PASSWORD'
+    dc_password: 'CHANGEME_LAB_ADMIN_PASSWORD'
+    recovery_password: 'CHANGEME_LAB_ADMIN_PASSWORD'
+    upstream_dns_1: 8.8.8.8
+    upstream_dns_2: 8.8.4.4
+    reverse_dns_zone: "10.0.1.0/24"
+    ntp_servers: "0.us.pool.ntp.org,1.us.pool.ntp.org,2.us.pool.ntp.org,3.us.pool.ntp.org"
+  gather_facts: no
+  tasks:
+
+
+#  - name: Wait for system to become reachable over WinRM
+#    wait_for_connection:
+#      timeout: 900
+
+
+ # - name: Disable firewall for Domain, Public and Private profiles
+ #   win_firewall:
+ #     state: disabled
+ #     profiles:
+ #     - Domain
+ #     - Private
+ #     - Public
+ #   tags: disable_firewall
+ #   retries: 5
+ #   delay: 10
+
+
+ # - name: Reg DisableRealTimeMonitoring
+ #   ansible.windows.win_regedit:
+ #     path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender
+ #     name: DisableRealtimeMonitoring
+ #     data: 1
+
+ # - name: Reg DisableBehaviorMonitoring
+ #   ansible.windows.win_regedit:
+ #     path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender
+ #     name: DisableBehaviorMonitoring
+ #     data: 1
+
+ # - name: Reg Disable firewall standard
+ #   ansible.windows.win_regedit:
+ #     path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\StandardProfile
+ #     name: EnableFirewall
+ #     data: 0
+
+ # - name: Reg disable firewall domain 
+ #   ansible.windows.win_regedit:
+ #     path: HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\DomainProfile
+ #     name: EnableFirewall
+ #     data: 0
+
+
+#   - name: disable AV
+#    win_shell: |
+#        Set-MpPreference -DisableRealtimeMonitoring $true
+#        Set-MpPreference -DisableIOAVProtection $true
+
+
+  - name: Change the hostname 
+    win_hostname:
+      name: '{{ dc_hostname }}'
+    register: res
+    retries: 5
+    delay: 10
+
+
+  - name: Reboot
+    win_reboot:
+    when: res.reboot_required   
+    retries: 5
+    delay: 10
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+
+
+  - name: Install Active Directory services & tools
+    win_feature: >
+        name=AD-Domain-Services
+         include_management_tools=yes
+         include_sub_features=yes
+         state=present
+    register: result
+    retries: 5
+    delay: 10
+
+#  - name: Create Domain
+#    win_domain: >
+#       dns_domain_name='{{ domain_name }}'
+#       safe_mode_password='{{ recovery_password }}'
+#    register: ad
+#    retries: 5
+#    delay: 10
+
+  - name: Create Domain V2
+    microsoft.ad.domain:
+      dns_domain_name: '{{ domain_name }}'
+      safe_mode_password: '{{ recovery_password }}'
+      reboot: true
+
+
+#  - name: Reboot server
+#    win_reboot:
+#     msg: "Installing AD. Rebooting..."
+#     pre_reboot_delay: 15
+#    when: ad.changed
+#    retries: 5
+#    delay: 10
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    
+
+  - name: Set internal DNS server 
+    win_dns_client:
+      adapter_names: '*'
+      ipv4_addresses:
+      - '127.0.0.1'
+    retries: 10
+    delay: 5
+
+#  - name: Ensure primary zone is present
+#    community.windows.win_dns_zone:
+#      name: demo.lab
+#      replication: domain
+#      type: primary
+#      state: present
+#    retries: 10
+#    delay: 5
+
+
+#  - name: Create DNS zone
+#    win_shell: 'Add-DnsServerPrimaryZone -NetworkID "10.0.1.0/24" -ReplicationScope Domain'
+#    register: result           
+#    until: result is succeeded
+#    retries: 4
+#    delay: 5
+#    ignore_errors: true
+
+  - ansible.windows.win_shell: Install-PackageProvider -Name Nuget -Force
+
+
+  - name: Check for xRemoteDesktopAdmin Powershell module
+    win_psmodule:
+      name: xRemoteDesktopAdmin
+      accept_license: true
+      skip_publisher_check: true
+      state: present
+    retries: 5
+    delay: 10
+    
+    
+  - name: Enable Remote Desktop
+    win_dsc:
+      resource_name: xRemoteDesktopAdmin
+      Ensure: present
+      UserAuthentication: NonSecure
+    retries: 5
+    delay: 10
+
+
+  - name: Install ADCS
+    win_feature:
+      name: AD-Certificate
+      state: present
+      include_sub_features: yes
+      include_management_tools: yes
+    register: win_feature
+    retries: 5
+    delay: 10
+
+
+
+  - name: Install-WindowsFeature ADCS-Cert-Authority
+    ansible.windows.win_feature:
+      name: ADCS-Cert-Authority
+      state: present
+      include_management_tools: yes
+    retries: 5
+    delay: 10
+
+  - name: Install-WindowsFeature ADCS-Web-Enrollment
+    ansible.windows.win_feature:
+      name: ADCS-Web-Enrollment
+      state: present
+    retries: 5
+    delay: 10
+
+# ESC 8
+# ignore error if already installed
+  - name: Enable Web enrollement
+    ansible.windows.win_powershell:
+      script: |
+        [CmdletBinding()]
+        param ()
+        try {
+          Install-AdcsWebEnrollment -Force
+          $Ansible.Changed = $true
+        } catch {
+          $Ansible.Changed = $false
+        }
+    retries: 5
+    delay: 10
+
+
+  - name: Make a domain admin
+    win_domain_user:
+      name: domain-administrator
+      password: CHANGEME_DOMAIN_ADMIN_PASSWORD
+      groups:
+        - Domain Admins
+      state: present
+    retries: 5
+    delay: 10
+
+  - name: Install-ADCSCertificationAuthority-PS
+    ansible.windows.win_powershell:
+      script: |
+        [CmdletBinding()]
+        param (
+            [String]
+            $domain_username,
+
+            [String]
+            $domain_password,
+
+            [String]
+            $ca_common_name
+        )
+        $pass = ConvertTo-SecureString $domain_password -AsPlainText -Force
+        $Cred = New-Object System.Management.Automation.PSCredential ($domain_username, $pass)
+        try {
+          Install-AdcsCertificationAuthority -Credential $Cred -CAType EnterpriseRootCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -KeyLength 2048 -HashAlgorithmName SHA256 -ValidityPeriod Years -ValidityPeriodUnits 5 -CACommonName $ca_common_name -Force
+          $Ansible.Changed = $true
+        } catch {
+          $Ansible.Changed = $false
+        }
+      error_action: stop
+      parameters:
+        domain_username: "demo.lab\\domain-administrator"
+        domain_password: "CHANGEME_DOMAIN_ADMIN_PASSWORD"
+        ca_common_name: "webservice.demo.lab"
+    retries: 5
+    delay: 10
+
+
+  - name: Install ADCSTemplate Creation Module
+    win_copy: 
+      src: ../files/adcsfiles/ADCSTemplate
+      dest: "C:\\Program Files\\WindowsPowerShell\\Modules"
+    retries: 5
+    delay: 10
+
+  - name: create a directory for templates
+    win_file: 
+      path: c:\setup
+      state: directory
+    retries: 5
+    delay: 10
+
+  - name: Copy templates json
+    win_copy:
+      src: "../files/adcsfiles/{{item}}.json"
+      dest: "C:\\setup\\{{item}}.json"
+    with_items:
+      - ESC1
+    retries: 5
+    delay: 10
+
+  - name: Install templates
+    win_shell: |
+      Import-Module ADCSTemplate
+      if (-not(Get-ADCSTemplate -DisplayName "{{item}}")) { New-ADCSTemplate -DisplayName "{{item}}" -JSON (Get-Content c:\setup\{{item}}.json -Raw) -Identity "demo\Domain Users" -Publish }
+    vars:
+      ansible_become: yes
+      ansible_become_method: runas
+      ansible_become_user: demo.lab\domain-administrator
+      ansible_become_password: CHANGEME_DOMAIN_ADMIN_PASSWORD
+      ansible_become_flags: logon_type=interactive logon_flags=with_profile
+    with_items:
+      - ESC1
+    retries: 5
+    delay: 10
+
+  - name: Execute certutil Auditfulter
+    ansible.windows.win_shell: certutil -setreg CA\AuditFilter 127
+
+  - name: Auditpol CS
+    ansible.windows.win_shell: auditpol /set /subcategory:”Certification Services” /success:enable /failure:enable
+
+  - name: Certutil
+    ansible.windows.win_shell: certutil -setreg policy\EditFlags +EDITF_AUDITCERTTEMPLATELOAD
+
+  - name: Restart certsvc
+    ansible.windows.win_shell: net stop certsvc
+
+  - name: Restart certsvc
+    ansible.windows.win_shell: net start certsvc

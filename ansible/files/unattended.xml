@@ -1,0 +1,14 @@
+<UserAccounts>
+     <LocalAccounts>
+         <LocalAccount>
+             <Password>
+                 <Value>CHANGEME_LOCALADMININST_PASSWORD</Value>
+                 <PlainText>false</PlainText>
+             </Password>
+             <Description>Local Admin Installer</Description>
+             <DisplayName>LocalAdminInst</DisplayName>
+             <Group>Administrators</Group>
+             <Name>LocalAdminInst</Name>
+         </LocalAccount>
+     </LocalAccounts>
+ </UserAccounts>

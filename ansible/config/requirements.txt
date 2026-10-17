@@ -1,0 +1,22 @@
+# Python dependencies for running the Ansible playbooks/roles under ansible/, fixer/ and
+# refresher/ (the Ansible *collection/runtime* side of this repo). Install with
+# `pip install -r ansible/config/requirements.txt` on the control host before running
+# ansible-playbook. This is separate from the top-level requirements.txt, which covers
+# the deployer.py/Terraform tooling instead.
+#
+# Trimmed from a much larger grab-bag list (apscheduler, aws-requests-auth, cffi,
+# croniter, elasticsearch, envparse, exotel, jira, jsonpointer, jsonschema, prison,
+# prometheus_client, py-zabbix, requests, sortedcontainers, statsd-tags, stomp.py,
+# tencentcloud-sdk-python, texttable, twilio, tzlocal, boto3, python-dateutil) down to
+# only the packages with evidence of use in this repo's playbooks/roles. None of the
+# dropped packages correspond to any module, integration or script actually referenced
+# under ansible/, fixer/ or refresher/ (verified by grepping playbooks and roles for
+# their module/import names) - they appear to be leftovers from a generic Ansible
+# collection requirements template.
+
+# Required by ansible-core itself to parse the YAML playbooks in ansible/, fixer/ and refresher/.
+PyYAML>=6.0
+
+# Required by ansible-core for the Jinja2 "{{ ... }}" templating used throughout the
+# playbooks and the logs_windows role's winlogbeat.yml.j2 template.
+Jinja2>=3.1.2

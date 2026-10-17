@@ -1,0 +1,242 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+
+  - name: Change hostname to Box2
+    win_hostname:
+      name: 'Box2'
+    register: res
+    retries: 5
+    delay: 10
+
+
+  - name: Reboot machine
+    win_reboot:
+    when: res.reboot_required
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    retries: 3
+    delay: 10
+    register: result
+    until: result is not failed
+
+  - name: Set domain controllers as DNS servers
+    win_dns_client:
+      adapter_names: '*'
+      ipv4_addresses: 10.0.1.100
+
+
+  - win_domain_membership:
+      dns_domain_name: demo.lab
+      domain_admin_user: lab-admin@demo.lab
+      domain_admin_password: CHANGEME_LAB_ADMIN_PASSWORD
+      state: domain
+    register: domain_state
+    until: domain_state is succeeded 
+    retries: 10
+    delay: 10
+    ignore_errors: true
+
+
+  - win_reboot:
+    when: domain_state.reboot_required
+    ignore_errors: yes
+    retries: 10
+    delay: 10
+
+  # Need to test disabling this, hopefully signed in user hash should only be in memory now
+  #- name: Enable plaintext passwords in memory
+  #  win_regedit:  
+  #    path: HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest 
+  #    name: UseLogonCredential
+  #    data: 1
+  #    type: dword
+  #  retries: 5
+  #  delay: 10
+
+
+  - name: Make LocalAdminInst a Ladmin
+    win_group_membership:
+      name: Administrators
+      members:
+        - demo.lab\LocalAdminInst
+      state: present
+    retries: 5
+    delay: 10
+
+
+  - name: Enable AutoAdminLogon
+    win_regedit:  
+      path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon 
+      name: AutoAdminLogon
+      data: 1
+      type: string
+    retries: 5
+    delay: 10
+
+  - name: Set Domain Name Winlogon
+    win_regedit:  
+      path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon 
+      name: DefaultDomainName
+      data: demo.lab
+      type: string
+    retries: 5
+    delay: 10
+
+  - name: Set Username Winlogon
+    win_regedit:  
+      path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon 
+      name: DefaultUserName
+      data: HaroldHolt
+      type: string
+    retries: 5
+    delay: 10
+
+  - name: Set Domain Password Winlogon
+    win_regedit:  
+      path: HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon 
+      name: DefaultPassword
+      data: CHANGEME_HAROLDHOLT_PASSWORD
+      type: string
+    retries: 5
+    delay: 10
+
+
+  - name: Enable LSA Protect (RunAsPPL)
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Lsa 
+      name: RunAsPPL
+      data: 1
+      type: dword
+    retries: 5
+    delay: 10
+
+
+  - name: Reboot machine
+    win_reboot:
+    when: res.reboot_required
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    register: result
+    retries: 3
+    delay: 10
+    until: result is not failed
+
+  - name: Make HaroldHolt a RMU user
+    win_group_membership:
+      name: Remote Management Users
+      members: 
+        - demo.lab\HaroldHolt
+    retries: 5
+    delay: 10
+
+
+#  - name: Make Box3 user log into box so it's creds are in LSASS
+#    win_shell: while($true) {write-host 'spam'; start-sleep -seconds 30}
+#    async: 120
+#    poll: 0
+#    become: yes
+#    become_user: demo\HaroldHolt
+#    become_method: runas
+#    vars:  
+#      ansible_become_pass: CHANGEME_HAROLDHOLT_PASSWORD
+#    retries: 5
+#    delay: 10
+
+
+
+
+
+  - name: Disable win firewall
+    win_firewall:
+      state: disabled
+      profiles: 
+        - Domain
+        - Public
+        - Private
+      tag: disable_firewall
+    retries: 5
+    delay: 10
+
+
+  - name: Disable windows defender
+    win_shell: | 
+        Set-MpPreference -DisableRealtimeMonitoring $true
+        Set-MpPreference -DisableIOAVProtection $true
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+  # disable-defender.exe removed for the public release: custom-built binary
+  # with no credible public upstream source, and redundant with the
+  # Set-MpPreference win_shell task above which already disables
+  # real-time monitoring and IOAV protection.
+
+  # mimikatz_trunk.zip pinned to release 2.2.0-20220919, the exact URL
+  # already referenced in docs/SOLUTIONS-SPOILERS.md.
+  - name: Download mimikatz
+    ansible.windows.win_get_url:
+      url: https://github.com/gentilkiwi/mimikatz/releases/download/2.2.0-20220919/mimikatz_trunk.zip
+      dest: C:\mimikatz_trunk.zip
+    retries: 5
+    delay: 10
+
+  - name: Make LocalAdminInst a RDP user
+    win_group_membership:
+      name: Remote Desktop Users
+      members: 
+        - demo.lab\LocalAdminInst
+    retries: 5
+    delay: 10
+
+
+#- name: Run PowerShell script that modifies the module changed result
+#  ansible.windows.win_powershell:
+#    script: |
+#      $trigger = New-ScheduledTaskTrigger `
+#          -Once `
+#          -At (Get-Date) `
+#          -RepetitionInterval (New-TimeSpan -Minutes 5) `
+#          -RepetitionDuration ([System.TimeSpan]::MaxValue)
+#      Register-ScheduledJob -Name "UpdateVersion" -ScriptBlock {( Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False ), (Set-MpPreference -DisableRealtimeMonitoring $true)} -Trigger $trigger
+
+
+
+  - name: Disable RDP NLA part 1
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp 
+      name: SecurityLayer
+      data: 0
+      type: dword
+    retries: 5
+    delay: 10
+
+
+  - name: Disable RDP NLA part 2 
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp 
+      name: UserAuthentication
+      data: 0
+      type: dword
+    retries: 5
+    delay: 10
+
+  - name: Make HaroldHolt a RDP user
+    win_group_membership:
+      name: Remote Desktop Users
+      members:
+        - demo.lab\HaroldHolt
+    retries: 5
+    delay: 10

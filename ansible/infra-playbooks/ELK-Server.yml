@@ -1,0 +1,219 @@
+- name: ELK Playbook
+  hosts: all
+  gather_facts: no
+  become: true
+  tasks:
+
+  - name: Add python repo deadeye
+    ansible.builtin.apt_repository:
+      repo: ppa:deadsnakes/ppa
+      update_cache: true
+
+  - name: Update and upgrade apt packages
+    become: true
+    apt:
+      upgrade: yes
+      update_cache: yes
+      cache_valid_time: 86400 #One day
+
+  - name: Add required dependencies.
+    apt:
+      name:
+        - apt-transport-https
+        - gnupg2
+        - python3.11
+        - python3-pip
+      state: present
+      update_cache: yes
+
+  - name: Update ubuntu user pwd
+    user:
+      name: ubuntu
+      update_password: always
+      password: $6$CHANGEME$REPLACE_WITH_YOUR_OWN_SHA512_HASH_use_mkpasswd_or_openssl_passwd_-6
+    retries: 5
+    delay: 10
+
+  - name: password auth enablee
+    become: yes
+    become_user: root
+    replace:
+      path: /etc/ssh/sshd_config
+      regexp: "^(.*)PasswordAuthentication(.*)$"
+      replace: "PasswordAuthentication yes"
+
+
+  - name: Enable ssh
+    become: yes
+    become_user: root
+    shell: "sudo systemctl restart ssh.service"
+
+
+  - name: Add Elasticsearch apt key.
+    apt_key:
+      url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+      state: present
+
+  - name: Add Elasticsearch repository.
+    apt_repository:
+      repo: 'deb https://artifacts.elastic.co/packages/7.x/apt stable main'
+      state: present
+      update_cache: true
+
+  - name: Install logstash
+    apt:
+      name: logstash
+      state: present
+
+  - name: Install java
+    apt:
+      name: openjdk-11-jre
+      state: present
+
+  - name: Install elasticsearch
+    apt:
+      name: elasticsearch
+      state: present
+
+  - name: Install kibana
+    apt:
+      name: kibana
+      state: present
+
+  - name: copy kibana config
+    copy:
+      src: ../config/kibana.yml
+      dest: /etc/kibana/kibana.yml
+      owner: "root"
+      group: "kibana"
+      mode: 0660
+
+  - name: copy kibana elastic CA certificate
+    copy:
+      src: ../config/elasticsearch-ca.pem
+      dest: /etc/kibana/elasticsearch-ca.pem
+      owner: "root"
+      group: "kibana"
+      mode: 0644
+
+  - name: elasticsearch change start timeout to 3min
+    lineinfile:
+      destfile: /usr/lib/systemd/system/elasticsearch.service
+      regexp: 'TimeoutStartSec='
+      line: 'TimeoutStartSec=180'
+
+  - name: copy elasticsearch config
+    copy:
+      src: ../config/elasticsearch.yml
+      dest: /etc/elasticsearch/elasticsearch.yml
+      owner: "root"
+      group: "elasticsearch"
+      mode: 0660
+
+  - name: copy elasticsearch HTTPS PKCS12 certificate
+    copy:
+      src: ../config/http.p12
+      dest: /etc/elasticsearch/http.p12
+      owner: "root"
+      group: "elasticsearch"
+      mode: 0644
+
+  - name: configure elasticsearch bootstrap password ('defcon')
+    ansible.builtin.shell:
+      cmd: echo "defcon" | sudo /usr/share/elasticsearch/bin/elasticsearch-keystore add "bootstrap.password"
+    ignore_errors: true
+
+  - name: enable logstash
+    service:
+      name: logstash
+      enabled: yes
+
+  - name: enable elasticsearch
+    service:
+      name: elasticsearch
+      enabled: yes
+
+  - name: enable kibana
+    service:
+      name: kibana
+      enabled: yes
+
+  - name: start logstash
+    service:
+      name: logstash
+      state: started
+
+  - name: start elasticsearch
+    service:
+      name: elasticsearch
+      state: started
+
+  - name: start kibana
+    service:
+      name: kibana
+      state: started
+
+  - name: Install xfce
+    apt:
+      name: xfce4
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+
+  - name: Install xrdp
+    apt:
+      name: xrdp
+      state: present
+      update_cache: true
+    retries: 5
+    delay: 10
+
+  - name: Enable XRDP
+    ansible.builtin.service:
+      name: xrdp
+      state: started
+      enabled: yes
+
+  - name: set 'kibana_system' password ('defcon')
+    uri:
+      url: https://localhost:9200/_xpack/security/user/kibana_system/_password
+      method: POST
+      body_format: json
+      body: "{ \"password\":\"defcon\" }"
+      user: "elastic"
+      password: "defcon"
+      force_basic_auth: yes
+      validate_certs: no
+
+#  - name: copy reqs elastasearch2
+#    copy:
+#        src: ../config/requirements.txt
+#        dest: /tmp/requirements.txt
+
+
+#  - name: Install specified python requirements
+#    ansible.builtin.pip:
+#      requirements: /tmp/requirements.txt
+
+
+  - name: Install elastasearch and sigma-cli python packages
+    ansible.builtin.pip:
+        name: ["elastalert2","sigma-cli"]
+
+  - name: Install sigma elasticsearch plugin
+    ansible.builtin.shell:
+        cmd: sigma plugin install elasticsearch
+
+  - name: Copy detection templates to ELK # TODO: Not confirmed working.
+    ansible.builtin.copy:
+        src: ../files/detections/
+        dest: /home/ubuntu/detections
+        owner: ubuntu
+        group: ubuntu
+        mode: u=rw,g=r,o=r
+
+  - name: Unlock ELK
+    ansible.builtin.command: sudo passwd -u ubuntu
+    become: yes
+    become_user: root

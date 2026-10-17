@@ -1,0 +1,16 @@
+title: Detection 0x04
+description: "Detection 0x04 - detecting NTLM Pass-the-Hash authentication."
+logsource:
+    product: windows
+    service: authentication
+detection:
+    selection:
+        - EventID: <EVENTID>
+          LogonType: '<LOGON_TYPE>'
+          LogonProcessName|contains: 'NtLmSsp'
+        - EventID: <EVENTID>
+          LogonType: '<LOGON_TYPE>'
+    filter:
+        - AccountName: 'ANONYMOUS LOGON'
+        - KeyLength: '0'
+    condition: selection and not filter

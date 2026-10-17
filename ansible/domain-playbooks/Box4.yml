@@ -1,0 +1,191 @@
+- hosts: all
+  gather_facts: no
+  tasks:
+
+  - name: Change machine name to Box4
+    win_hostname:
+      name: 'Box4'
+    register: res
+    retries: 5
+    delay: 10
+
+
+  - name: Reboot machine
+    win_reboot:
+    when: res.reboot_required
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    register: result
+    retries: 3
+    until: result is not failed
+    retries: 5
+    delay: 10
+
+
+  - name: Set domain controllers as DNS servers
+    win_dns_client:
+      adapter_names: '*'
+      ipv4_addresses: 10.0.1.100
+
+
+  - win_domain_membership:
+      dns_domain_name: demo.lab
+      domain_admin_user: lab-admin@demo.lab
+      domain_admin_password: CHANGEME_LAB_ADMIN_PASSWORD
+      state: domain
+    register: domain_state
+    until: domain_state is succeeded 
+    retries: 5
+    delay: 10
+
+
+  - win_reboot:
+    when: domain_state.reboot_required
+    ignore_errors: yes
+    retries: 10
+    delay: 10
+
+
+  - name: Wait for system to become reachable over WinRM
+    wait_for_connection:
+      timeout: 900
+    register: result
+    retries: 3
+    until: result is not failed
+
+  - name: Disable win firewall
+    win_firewall:
+      state: disabled
+      profiles: 
+        - Domain
+        - Public
+        - Private
+      tag: disable_firewall
+    retries: 5
+    delay: 10
+
+
+  - name: Disable windows defender
+    win_shell: | 
+        Set-MpPreference -DisableRealtimeMonitoring $true
+        Set-MpPreference -DisableIOAVProtection $true
+    retries: 5
+    delay: 10
+    ignore_errors: yes
+
+
+  # disable-defender.exe removed for the public release: it was a custom-built
+  # binary with no credible public upstream source, and it duplicated the
+  # Set-MpPreference win_shell task above, which already disables real-time
+  # monitoring and IOAV protection. The committed binary and its copy/run
+  # tasks were dropped as redundant rather than converted to a download.
+
+  - name: Disable RDP NLA part 1
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp 
+      name: SecurityLayer
+      data: 0
+      type: dword
+    retries: 5
+    delay: 10
+
+
+  - name: Disable RDP NLA part 2 
+    win_regedit:  
+      path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp 
+      name: UserAuthentication
+      data: 0
+      type: dword
+    retries: 5
+    delay: 10
+
+
+  - name: Make a service path that is unquoted
+    win_service:
+      name: MaintServ
+      path: C:\ProgramData\Services Folder\maintenanceservice.exe
+      username: SYSTEM
+    retries: 5
+    delay: 10
+
+  # SetACL.exe has no credible pinned public release URL (it's a legacy
+  # freeware tool from helgeklein.com/setacl, not distributed via GitHub
+  # releases or SharpCollection/GhostPack), so it is kept as a committed
+  # binary here rather than invented a download source. If you want to
+  # remove it from the repo, build/obtain it yourself from the vendor site
+  # above and place it at ansible/files/SetACL.exe before provisioning.
+  - name: Copy setacl
+    ansible.windows.win_copy:
+      src: ../files/SetACL.exe
+      dest: C:\SetACL.exe
+    retries: 5
+    delay: 10
+
+  # PowerUp.ps1 pinned to PowerSploit master (PowerShellMafia/PowerSploit),
+  # same URL already referenced in docs/SOLUTIONS-SPOILERS.md.
+  - name: Download powerup
+    ansible.windows.win_get_url:
+      url: https://raw.githubusercontent.com/PowerShellMafia/PowerSploit/master/Privesc/PowerUp.ps1
+      dest: C:\PowerUp.ps1
+    retries: 5
+    delay: 10
+
+  # Certify.exe pinned to the GhostPack-CompiledBinaries mirror (prebuilt
+  # GhostPack tool binaries), same repo already referenced for Rubeus.exe
+  # below and in ansible/files/cheatsheet.txt.
+  - name: Download certify
+    ansible.windows.win_get_url:
+      url: https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe
+      dest: C:\Certify.exe
+    retries: 5
+    delay: 10
+
+  # Rubeus.exe pinned to the GhostPack-CompiledBinaries mirror, the exact
+  # URL already referenced in ansible/files/cheatsheet.txt line 309.
+  - name: Download rubeus
+    ansible.windows.win_get_url:
+      url: https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Rubeus.exe
+      dest: C:\Rubeus.exe
+    retries: 5
+    delay: 10
+
+  - name: Make GoughWhitlam a RDP user
+    win_group_membership:
+      name: Remote Desktop Users
+      members: 
+        - demo.lab\GoughWhitlam
+    retries: 5
+    delay: 10
+
+  - name: Run setacl to set maintserv up with right perms
+    win_shell: SetACL.exe -on "MaintServ" -ot srv -actn ace -ace "n:demo\GoughWhitlam;P:full"
+    args:
+      executable: cmd
+      chdir: C:\
+    become: yes
+    become_user: demo.lab\domain-administrator
+    become_method: runas
+    vars:
+      ansible_become_pass: CHANGEME_DOMAIN_ADMIN_PASSWORD
+    retries: 5
+    delay: 10
+
+  # If this hash in LSASS will this enable PTH?
+  - name: Make Box3 user log into box so it's creds are in LSASS
+    win_shell: while($true) {write-host 'spam'; start-sleep -seconds 30}
+    async: 120
+    poll: 0
+    become: yes
+    become_user: demo.lab\GoughWhitlam
+    become_method: runas
+    vars:  
+      ansible_become_pass: CHANGEME_GOUGHWHITLAM_PASSWORD
+    retries: 5
+    delay: 10
+

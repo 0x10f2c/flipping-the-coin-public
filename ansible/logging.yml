@@ -1,0 +1,4 @@
+- name: Install log agent on windows vms
+  hosts: all
+  roles:
+    - { role: 'logs_windows', tags: 'agent' }

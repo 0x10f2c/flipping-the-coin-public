@@ -1,0 +1,22 @@
+# Terraform
+**/.terraform/*
+.terraform.lock.hcl
+**/*.tfstate*
+terraform.tfstate.d/
+terraform_states/**
+terraform.tfvars
+*.tfvars
+!*.tfvars.example
+
+# Secrets & generated credentials
+keys/
+*.p12
+*-ca.pem
+
+# VPN artifacts (Ansible `fetch` module output dirs, named after the fetched
+# file, containing per-IP subdirectories with real VPN certs/keys)
+vpns/*
+**/client.ovpn/
+**/support.ovpn/
+**/labclient.ovpn/
+**/labsupport.ovpn/
